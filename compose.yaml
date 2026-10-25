@@ -1,0 +1,94 @@
+name: self-hosted-support
+x-app: &app
+  build: .
+  image: self-hosted-support:local
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://support:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/support
+    UPLOAD_DIR: /data/uploads
+  volumes:
+    - uploads:/data/uploads
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  networks: [private]
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: support
+      POSTGRES_DB: support
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U support -d support']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 400m
+    shm_size: 128mb
+    command: [postgres, -c, shared_buffers=96MB, -c, max_connections=40]
+    networks: [private]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  migrate:
+    <<: *app
+    command: [sh, -c, 'alembic upgrade head && python -m app.bootstrap']
+    restart: 'no'
+    depends_on:
+      db: {condition: service_healthy}
+    mem_limit: 200m
+  api:
+    <<: *app
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 450m
+  worker:
+    <<: *app
+    command: [python, -m, app.worker]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    mem_limit: 250m
+    healthcheck:
+      test: [CMD, python, -m, app.worker_health]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      SUPPORT_DOMAIN: ${SUPPORT_DOMAIN:?Set SUPPORT_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+    mem_limit: 150m
+    networks: [private,egress]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+volumes:
+  postgres:
+  uploads:
+  caddy_data:
+  caddy_config:
+networks:
+  private:
+  egress:

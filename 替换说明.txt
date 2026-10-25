@@ -1,0 +1,43 @@
+完整项目替换说明
+源码版本：6b3c30038f10dd8ae246f4b1e0827fc6f7b1e6ee
+
+此包包含前后端、Docker Compose、数据库迁移、测试和部署文档，以及本次全部代码修改。
+不含真实 .env、后台密码、Telegram/Bark 密钥、客户聊天数据和备份。
+
+一、替换 GitHub 仓库
+解压后，将 crisp 文件夹里面的文件和子目录上传到仓库根目录。
+不要把整个 crisp 文件夹作为新的子目录上传。
+请同时保留隐藏文件 .gitignore、.dockerignore 和 .env.example。
+提交后核对 backend/migrations/versions/0002_chat_presentation.py 存在。
+
+二、替换已有 VPS 项目
+当前 VPS 已经部署此版本；若仅更新 GitHub，无需重复部署。
+需要重新部署时，先备份，再覆盖源文件。
+保留现有 /opt/crisp/.env、backups、Docker 数据卷，不要用包内 .env.example 覆盖真实 .env。
+不要重新生成 ENCRYPTION_KEY，不要执行 docker compose down -v。
+在 /opt/crisp 目录按顺序运行：
+
+sh scripts/backup.sh
+docker compose build
+docker compose stop api worker
+docker compose run --rm --no-deps -T migrate
+docker compose up -d --no-deps --force-recreate api worker
+docker compose ps
+
+只有上一条命令成功后才继续下一条。迁移失败时保留数据并停止升级。
+本版本需要执行 0002 迁移，不能只覆盖前端文件。
+网页打开后刷新页面，后台账号和现有站点数据保持不变。
+
+三、全新部署
+参阅 README.md 和 docs/DEPLOYMENT.md。
+python3 scripts/generate-env.py 会创建随机密钥；修改新建 .env 中的域名、PUBLIC_URL 和证书邮箱后执行 docker compose up -d --build。
+
+四、本次功能
+- Telegram 配置保存保留已有校验密钥，并自动注册 Webhook。
+- Enter 发送、Shift+Enter 换行，中文输入法选字不误发送。
+- 消息标签显示客户邮箱和站点名称；自己绿色、对方白色。
+- 开始聊天填写问题并直接保存为首条消息；不超过 5 字时提示“请完善问题”，界面不显示字数要求。
+- 后台可编辑窗口标题、状态文案、欢迎页标题/图标、欢迎语、问题提示和营业时间说明。
+- Bark 配置保存即时生效。
+
+原部署验证：前端构建通过，35 项后端测试通过、1 项 PostgreSQL 专项在 SQLite 测试模式下跳过；实际浏览器已检查回车发送、字数校验、回复同步和消息展示。
